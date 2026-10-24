@@ -10,135 +10,411 @@
     body {
       margin: 0;
       font-family: Arial, sans-serif;
-      background: #111827;
+      background: #10131b;
       color: white;
     }
-    main {
-      max-width: 800px;
-      margin: 35px auto;
-      padding: 16px;
+    header {
+      background: #1b2030;
+      padding: 18px;
+      text-align: center;
+      border-bottom: 2px solid #5865f2;
     }
-    h1 { color: #60a5fa; }
-    section {
-      background: #1f2937;
+    h1 { margin: 0; color: #8290ff; }
+    main {
+      max-width: 900px;
+      margin: 25px auto;
+      padding: 15px;
+    }
+    .panel {
+      background: #1b2030;
+      padding: 18px;
       border-radius: 12px;
-      padding: 16px;
-      margin-top: 18px;
+      margin-bottom: 18px;
     }
     input, button {
       padding: 12px;
       border: 0;
       border-radius: 7px;
-      font-size: 15px;
+      margin: 4px 0;
     }
     input {
-      background: #374151;
+      background: #292f40;
       color: white;
-      min-width: 0;
-      flex: 1;
+      max-width: 100%;
     }
     button {
-      background: #2563eb;
+      background: #5865f2;
       color: white;
       cursor: pointer;
     }
-    .row { display: flex; gap: 8px; }
+    button:hover { background: #4752c4; }
     #messages {
-      height: 300px;
+      height: 280px;
       overflow-y: auto;
-      margin-bottom: 12px;
-    }
-    .msg {
-      background: #111827;
-      border-radius: 7px;
-      padding: 10px;
-      margin: 7px 0;
+      background: #11151f;
+      padding: 12px;
+      border-radius: 8px;
       overflow-wrap: anywhere;
     }
-    .muted { color: #9ca3af; font-size: 13px; }
+    .message { margin-bottom: 12px; }
+    .time { color: #9ba4bd; font-size: 12px; }
+    #videos {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    video {
+      width: 100%;
+      max-width: 350px;
+      background: black;
+      border-radius: 8px;
+    }
+    .status { color: #aeb8d3; font-size: 14px; }
   </style>
 </head>
 <body>
-<main>
-  <h1>Sulismc</h1>
-  <p class="muted">Közösségi chat</p>
+  <header>
+    <h1>Sulismc</h1>
+    <p>Közösségi chat és hívások</p>
+  </header>
 
-  <section>
-    <h3>Belépés</h3>
-    <div class="row">
-      <input id="name" placeholder="Felhasználónév">
-      <button id="join">Csatlakozás</button>
-    </div>
-    <p id="status" class="muted">Kapcsolódás...</p>
-  </section>
+  <main>
+    <section class="panel">
+      <h2>Belépés</h2>
+      <input id="username" maxlength="24" placeholder="Felhasználónév">
+      <button id="joinBtn">Belépés a chatbe</button>
+      <p id="status" class="status">Még nem léptél be.</p>
+    </section>
 
-  <section>
-    <h3>Közös chat</h3>
-    <div id="messages"></div>
-    <form id="form" class="row">
-      <input id="text" placeholder="Írj üzenetet..." maxlength="1000" disabled>
-      <button id="send" disabled>Küldés</button>
-    </form>
-  </section>
-</main>
+    <section class="panel">
+      <h2>Közös chat</h2>
+      <div id="messages"></div>
+      <form id="messageForm">
+        <input id="messageInput" maxlength="1000"
+          placeholder="Írd ide az üzeneted..." style="width:75%">
+        <button type="submit">Küldés</button>
+      </form>
+    </section>
 
-<script src="/socket.io/socket.io.js"></script>
-<script>
-const socket = io();
-const nameInput = document.getElementById("name");
-const joinButton = document.getElementById("join");
-const status = document.getElementById("status");
-const messages = document.getElementById("messages");
-const textInput = document.getElementById("text");
-const sendButton = document.getElementById("send");
-let joined = false;
+    <section class="panel">
+      <h2>Hang- és videóhívás</h2>
+      <button id="callBtn">Csatlakozás a híváshoz</button>
+      <button id="micBtn">Mikrofon kikapcsolása</button>
+      <button id="cameraBtn">Kamera kikapcsolása</button>
+      <button id="screenBtn">Képernyő megosztása</button>
+      <button id="leaveBtn">Kilépés a hívásból</button>
+      <p id="callStatus" class="status">Nem vagy hívásban.</p>
+      <div id="videos">
+        <div>
+          <p>Saját videód</p>
+          <video id="localVideo" autoplay muted playsinline></video>
+        </div>
+        <div id="remoteVideos"></div>
+      </div>
+    </section>
+  </main>
 
-function addMessage(content, system = false) {
-  const div = document.createElement("div");
-  div.className = system ? "muted" : "msg";
-  div.textContent = content;
-  messages.appendChild(div);
-  messages.scrollTop = messages.scrollHeight;
-}
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    const $ = id => document.getElementById(id);
 
-socket.on("connect", () => {
-  status.textContent = "Kapcsolódva a szerverhez!";
-});
-socket.on("connect_error", () => {
-  status.textContent = "Nem sikerült csatlakozni a szerverhez.";
-});
-socket.on("disconnect", () => {
-  status.textContent = "Kapcsolat megszakadt.";
-});
+    let username = "";
+    let localStream = null;
+    let screenStream = null;
+    let inCall = false;
+    let micEnabled = true;
+    let cameraEnabled = true;
+    const peers = new Map();
+    const pendingCandidates = new Map();
 
-joinButton.onclick = () => {
-  const name = nameInput.value.trim();
-  if (!name) {
-    status.textContent = "Írj be egy felhasználónevet!";
-    return;
-  }
-  socket.emit("join", name);
-  joined = true;
-  nameInput.disabled = true;
-  joinButton.disabled = true;
-  textInput.disabled = false;
-  sendButton.disabled = false;
-  status.textContent = "Belépve: " + name;
-};
+    const rtcConfig = {
+      iceServers: [
+        { urls: "stun:stun.l.google.com:19302" }
+      ]
+    };
 
-socket.on("notice", text => addMessage(text, true));
+    function addMessage(name, text, time = "") {
+      const div = document.createElement("div");
+      div.className = "message";
 
-socket.on("message", data => {
-  addMessage(data.name + ": " + data.text);
-});
+      const heading = document.createElement("strong");
+      heading.textContent = name + " ";
+      const content = document.createElement("span");
+      content.textContent = text;
+      const stamp = document.createElement("span");
+      stamp.className = "time";
+      stamp.textContent = time ? " (" + time + ")" : "";
 
-document.getElementById("form").onsubmit = event => {
-  event.preventDefault();
-  const text = textInput.value.trim();
-  if (!joined || !text) return;
-  socket.emit("message", text);
-  textInput.value = "";
-};
-</script>
+      div.append(heading, content, stamp);
+      $("messages").appendChild(div);
+      $("messages").scrollTop = $("messages").scrollHeight;
+    }
+
+    $("joinBtn").onclick = () => {
+      const name = $("username").value.trim();
+      if (!name) {
+        alert("Írj be egy felhasználónevet!");
+        return;
+      }
+      if (username) return;
+      socket.emit("join", name);
+    };
+
+    socket.on("joined", data => {
+      username = data.name;
+      $("username").disabled = true;
+      $("joinBtn").disabled = true;
+      $("status").textContent = "Belépve: " + username;
+      addMessage("Rendszer", "Sikeresen beléptél.");
+    });
+
+    socket.on("message", msg => {
+      addMessage(msg.name, msg.text, msg.time);
+    });
+
+    socket.on("notice", text => addMessage("Rendszer", text));
+
+    $("messageForm").onsubmit = event => {
+      event.preventDefault();
+      if (!username) {
+        alert("Előbb lépj be!");
+        return;
+      }
+      const text = $("messageInput").value.trim();
+      if (!text) return;
+      socket.emit("message", text);
+      $("messageInput").value = "";
+    };
+
+    function showCallStatus(text) {
+      $("callStatus").textContent = text;
+    }
+
+    async function makePeer(id, shouldOffer) {
+      if (peers.has(id)) return peers.get(id);
+
+      const pc = new RTCPeerConnection(rtcConfig);
+      peers.set(id, pc);
+      pendingCandidates.set(id, []);
+
+      if (localStream) {
+        localStream.getTracks().forEach(track => {
+          pc.addTrack(track, localStream);
+        });
+      }
+
+      pc.onicecandidate = event => {
+        if (event.candidate) {
+          socket.emit("call:signal", {
+            to: id,
+            data: { candidate: event.candidate }
+          });
+        }
+      };
+
+      pc.ontrack = event => {
+        let video = document.getElementById("remote-" + id);
+        if (!video) {
+          const wrap = document.createElement("div");
+          const label = document.createElement("p");
+          label.textContent = "Másik résztvevő";
+          video = document.createElement("video");
+          video.id = "remote-" + id;
+          video.autoplay = true;
+          video.playsInline = true;
+          wrap.append(label, video);
+          $("remoteVideos").appendChild(wrap);
+        }
+        video.srcObject = event.streams[0];
+      };
+
+      pc.onconnectionstatechange = () => {
+        if (pc.connectionState === "failed") {
+          showCallStatus("A kapcsolat nem sikerült. Próbálj újra csatlakozni.");
+        }
+      };
+
+      if (shouldOffer) {
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        socket.emit("call:signal", {
+          to: id,
+          data: { description: pc.localDescription }
+        });
+      }
+      return pc;
+    }
+
+    async function addCandidate(id, candidate) {
+      const pc = peers.get(id);
+      if (!pc || !pc.remoteDescription) {
+        if (!pendingCandidates.has(id)) pendingCandidates.set(id, []);
+        pendingCandidates.get(id).push(candidate);
+        return;
+      }
+      try {
+        await pc.addIceCandidate(candidate);
+      } catch (error) {
+        console.error(error);
+      }
+    }
+
+    async function flushCandidates(id) {
+      const pc = peers.get(id);
+      const list = pendingCandidates.get(id) || [];
+      if (!pc || !pc.remoteDescription) return;
+      pendingCandidates.set(id, []);
+      for (const candidate of list) {
+        try {
+          await pc.addIceCandidate(candidate);
+        } catch (error) {
+          console.error(error);
+        }
+      }
+    }
+
+    socket.on("call:peers", async ids => {
+      for (const id of ids) {
+        await makePeer(id, true);
+      }
+    });
+
+    socket.on("call:peer-joined", async peer => {
+      showCallStatus(peer.name + " csatlakozott a híváshoz.");
+      await makePeer(peer.id, false);
+    });
+
+    socket.on("call:signal", async ({ from, data }) => {
+      try {
+        const pc = await makePeer(from, false);
+
+        if (data.description) {
+          await pc.setRemoteDescription(data.description);
+          await flushCandidates(from);
+
+          if (data.description.type === "offer") {
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            socket.emit("call:signal", {
+              to: from,
+              data: { description: pc.localDescription }
+            });
+          }
+        }
+
+        if (data.candidate) {
+          await addCandidate(from, data.candidate);
+        }
+      } catch (error) {
+        console.error(error);
+        showCallStatus("Hívási hiba. Nézd meg a böngésző konzolját.");
+      }
+    });
+
+    socket.on("call:peer-left", ({ id }) => {
+      if (peers.has(id)) peers.get(id).close();
+      peers.delete(id);
+      pendingCandidates.delete(id);
+      const video = $("remote-" + id);
+      if (video && video.parentElement) video.parentElement.remove();
+      showCallStatus("Egy résztvevő kilépett.");
+    });
+
+    $("callBtn").onclick = async () => {
+      if (!username) {
+        alert("Előbb lépj be a chatbe!");
+        return;
+      }
+      if (inCall) return;
+
+      try {
+        localStream = await navigator.mediaDevices.getUserMedia({
+          audio: true,
+          video: true
+        });
+        $("localVideo").srcObject = localStream;
+        inCall = true;
+        socket.emit("call:join");
+        showCallStatus("Csatlakoztál a híváshoz.");
+      } catch (error) {
+        showCallStatus("Nem sikerült elérni a mikrofont vagy kamerát. Engedélyezd a böngészőben.");
+      }
+    };
+
+    $("micBtn").onclick = () => {
+      if (!localStream) return;
+      micEnabled = !micEnabled;
+      localStream.getAudioTracks().forEach(t => t.enabled = micEnabled);
+      $("micBtn").textContent = micEnabled
+        ? "Mikrofon kikapcsolása" : "Mikrofon bekapcsolása";
+    };
+
+    $("cameraBtn").onclick = () => {
+      if (!localStream) return;
+      cameraEnabled = !cameraEnabled;
+      localStream.getVideoTracks().forEach(t => t.enabled = cameraEnabled);
+      $("cameraBtn").textContent = cameraEnabled
+        ? "Kamera kikapcsolása" : "Kamera bekapcsolása";
+    };
+
+    $("screenBtn").onclick = async () => {
+      if (!inCall) {
+        alert("Előbb csatlakozz a híváshoz!");
+        return;
+      }
+      try {
+        screenStream = await navigator.mediaDevices.getDisplayMedia({
+          video: true
+        });
+        const screenTrack = screenStream.getVideoTracks()[0];
+
+        for (const pc of peers.values()) {
+          const sender = pc.getSenders().find(s =>
+            s.track && s.track.kind === "video"
+          );
+          if (sender) await sender.replaceTrack(screenTrack);
+        }
+
+        $("localVideo").srcObject = screenStream;
+        screenTrack.onended = async () => {
+          if (!localStream) return;
+          for (const pc of peers.values()) {
+            const sender = pc.getSenders().find(s =>
+              s.track && s.track.kind === "video"
+            );
+            const cameraTrack = localStream.getVideoTracks()[0];
+            if (sender && cameraTrack) await sender.replaceTrack(cameraTrack);
+          }
+          $("localVideo").srcObject = localStream;
+          screenStream = null;
+        };
+      } catch (error) {
+        showCallStatus("A képernyőmegosztás nem indult el.");
+      }
+    };
+
+    $("leaveBtn").onclick = () => {
+      if (!inCall) return;
+      socket.emit("call:leave");
+      for (const pc of peers.values()) pc.close();
+      peers.clear();
+      pendingCandidates.clear();
+
+      if (localStream) {
+        localStream.getTracks().forEach(track => track.stop());
+      }
+      if (screenStream) {
+        screenStream.getTracks().forEach(track => track.stop());
+      }
+
+      localStream = null;
+      screenStream = null;
+      inCall = false;
+      $("localVideo").srcObject = null;
+      $("remoteVideos").innerHTML = "";
+      showCallStatus("Kiléptél a hívásból.");
+    };
+  </script>
 </body>
 </html>
