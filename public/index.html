@@ -1,0 +1,144 @@
+
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sulismc</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #111827;
+      color: white;
+    }
+    main {
+      max-width: 800px;
+      margin: 35px auto;
+      padding: 16px;
+    }
+    h1 { color: #60a5fa; }
+    section {
+      background: #1f2937;
+      border-radius: 12px;
+      padding: 16px;
+      margin-top: 18px;
+    }
+    input, button {
+      padding: 12px;
+      border: 0;
+      border-radius: 7px;
+      font-size: 15px;
+    }
+    input {
+      background: #374151;
+      color: white;
+      min-width: 0;
+      flex: 1;
+    }
+    button {
+      background: #2563eb;
+      color: white;
+      cursor: pointer;
+    }
+    .row { display: flex; gap: 8px; }
+    #messages {
+      height: 300px;
+      overflow-y: auto;
+      margin-bottom: 12px;
+    }
+    .msg {
+      background: #111827;
+      border-radius: 7px;
+      padding: 10px;
+      margin: 7px 0;
+      overflow-wrap: anywhere;
+    }
+    .muted { color: #9ca3af; font-size: 13px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Sulismc</h1>
+  <p class="muted">Közösségi chat</p>
+
+  <section>
+    <h3>Belépés</h3>
+    <div class="row">
+      <input id="name" placeholder="Felhasználónév">
+      <button id="join">Csatlakozás</button>
+    </div>
+    <p id="status" class="muted">Kapcsolódás...</p>
+  </section>
+
+  <section>
+    <h3>Közös chat</h3>
+    <div id="messages"></div>
+    <form id="form" class="row">
+      <input id="text" placeholder="Írj üzenetet..." maxlength="1000" disabled>
+      <button id="send" disabled>Küldés</button>
+    </form>
+  </section>
+</main>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const socket = io();
+const nameInput = document.getElementById("name");
+const joinButton = document.getElementById("join");
+const status = document.getElementById("status");
+const messages = document.getElementById("messages");
+const textInput = document.getElementById("text");
+const sendButton = document.getElementById("send");
+let joined = false;
+
+function addMessage(content, system = false) {
+  const div = document.createElement("div");
+  div.className = system ? "muted" : "msg";
+  div.textContent = content;
+  messages.appendChild(div);
+  messages.scrollTop = messages.scrollHeight;
+}
+
+socket.on("connect", () => {
+  status.textContent = "Kapcsolódva a szerverhez!";
+});
+socket.on("connect_error", () => {
+  status.textContent = "Nem sikerült csatlakozni a szerverhez.";
+});
+socket.on("disconnect", () => {
+  status.textContent = "Kapcsolat megszakadt.";
+});
+
+joinButton.onclick = () => {
+  const name = nameInput.value.trim();
+  if (!name) {
+    status.textContent = "Írj be egy felhasználónevet!";
+    return;
+  }
+  socket.emit("join", name);
+  joined = true;
+  nameInput.disabled = true;
+  joinButton.disabled = true;
+  textInput.disabled = false;
+  sendButton.disabled = false;
+  status.textContent = "Belépve: " + name;
+};
+
+socket.on("notice", text => addMessage(text, true));
+
+socket.on("message", data => {
+  addMessage(data.name + ": " + data.text);
+});
+
+document.getElementById("form").onsubmit = event => {
+  event.preventDefault();
+  const text = textInput.value.trim();
+  if (!joined || !text) return;
+  socket.emit("message", text);
+  textInput.value = "";
+};
+</script>
+</body>
+</html>
