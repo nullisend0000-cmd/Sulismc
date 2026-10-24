@@ -1,28 +1,341 @@
-<!doctype html>
-<html lang="hu"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SulisMC közösség</title><style>
-:root{color-scheme:dark;--bg:#10131b;--panel:#1a2030;--line:#30384b;--accent:#70e1b1;--text:#f2f5fa;--muted:#aeb8ca}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px system-ui,Arial}button,input{font:inherit}button{background:var(--accent);color:#102018;border:0;border-radius:9px;padding:10px 14px;font-weight:700;cursor:pointer}button.secondary{background:#30384b;color:var(--text)}button:disabled{opacity:.5;cursor:not-allowed}.hidden{display:none!important}.login{max-width:420px;margin:8vh auto;padding:26px;background:var(--panel);border:1px solid var(--line);border-radius:18px}.login h1{margin-top:0}.login input{width:100%;padding:12px;margin:7px 0 14px;border:1px solid var(--line);border-radius:9px;background:#0f131d;color:white}.layout{height:100dvh;display:grid;grid-template-columns:250px 1fr}.side{background:var(--panel);border-right:1px solid var(--line);padding:18px;overflow:auto}.brand{font-size:24px;font-weight:900;color:var(--accent)}.hint{font-size:13px;color:var(--muted)}.profile{display:flex;align-items:center;gap:10px;margin:20px 0}.avatar{width:40px;height:40px;flex:0 0 40px;border-radius:50%;object-fit:cover;background:#374157;display:grid;place-items:center;font-weight:800}.users{list-style:none;padding:0}.users li{display:flex;align-items:center;gap:8px;padding:8px 0;overflow-wrap:anywhere}.users .avatar{width:30px;height:30px;flex-basis:30px}.main{min-width:0;display:flex;flex-direction:column}.top{padding:14px 18px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}.top h2{margin:0}.actions{display:flex;gap:8px;flex-wrap:wrap}.messages{padding:18px;flex:1;overflow:auto}.message{display:flex;gap:10px;margin:0 0 17px}.message .meta{font-size:13px;color:var(--muted);margin-bottom:3px}.message .text{overflow-wrap:anywhere;white-space:pre-wrap}.compose{display:flex;gap:8px;padding:14px;border-top:1px solid var(--line)}.compose input{flex:1;min-width:0;background:#0f131d;color:white;border:1px solid var(--line);border-radius:9px;padding:12px}.status{color:var(--muted);font-size:13px}.callbox{padding:10px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px;flex-wrap:wrap}.video-grid{display:flex;gap:8px;flex-wrap:wrap}.video-grid video{width:180px;max-height:130px;background:#000;border-radius:8px}.error{color:#ff9b9b;min-height:1.3em}@media(max-width:680px){.layout{grid-template-columns:1fr;height:100dvh}.side{display:none}.top{padding:10px}.messages{padding:12px}.compose{padding:10px}}
-</style></head><body>
-<section id="login" class="login"><h1>🟢 SulisMC</h1><p class="hint">Közösségi chat és hanghívás</p><label for="name">Felhasználónév</label><input id="name" maxlength="24" placeholder="pl. asd" autocomplete="nickname"><label for="code">Belépőkód</label><input id="code" type="password" placeholder="Belépőkód"><label for="avatarFile">Profilkép (nem kötelező)</label><input id="avatarFile" type="file" accept="image/*"><button id="loginBtn">Belépés</button><p id="loginError" class="error"></p><p class="hint">A mikrofonhoz és a képernyőmegosztáshoz engedélyt kell adnod a böngészőben.</p></section>
-<section id="app" class="layout hidden"><aside class="side"><div class="brand">SulisMC</div><div class="hint">KÖZÖSSÉG</div><div class="profile"><img id="myAvatar" class="avatar" alt="Profilkép"><div><b id="myName"></b><div class="hint">Online</div></div></div><label class="hint" for="changeAvatar">Profilkép módosítása</label><input id="changeAvatar" type="file" accept="image/*" style="width:100%;margin-top:8px"><h3>Online tagok <span id="count">0</span></h3><ul id="userList" class="users"></ul><p class="hint">A tagok csak akkor látszanak, amikor be vannak lépve.</p></aside><main class="main"><header class="top"><h2>💬 SulisMC chat</h2><div class="actions"><button id="micBtn" class="secondary">🎙️ Mikrofon bekapcsolása</button><button id="shareBtn" class="secondary">🖥️ Képernyő megosztása</button></div></header><div class="callbox"><span id="callStatus" class="status">Nincs aktív hívás. A hanghíváshoz kapcsold be a mikrofont.</span><button id="leaveCall" class="secondary" disabled>Hívás befejezése</button><div id="videos" class="video-grid"></div><div id="remoteAudio"></div></div><section id="messages" class="messages" aria-live="polite"></section><form id="form" class="compose"><input id="messageInput" maxlength="1000" placeholder="Írj üzenetet…" autocomplete="off"><button>Küldés</button></form></main></section>
-<script src="/socket.io/socket.io.js"></script><script>
-const $=id=>document.getElementById(id);let socket,me=null,avatarData='',localStream=null,screenStream=null;const peers=new Map(),remoteEls=new Map();
-function avatar(el,name,data){if(data){el.src=data;el.style.visibility='visible'}else{el.removeAttribute('src');el.alt=name||'?';el.style.visibility='visible';el.style.background='#374157';el.style.objectFit='contain';el.dataset.initial=(name||'?').slice(0,1).toUpperCase();el.title=name||'';}}
-function makeAvatar(name,data){const img=document.createElement('img');img.className='avatar';img.alt=name||'?';if(data)img.src=data;else{img.style.display='none';const span=document.createElement('span');span.className='avatar';span.textContent=(name||'?').slice(0,1).toUpperCase();span.style.cssText='display:grid;place-items:center';return span}return img}
-function readImage(file){return new Promise((resolve,reject)=>{if(!file)return resolve('');if(!file.type.startsWith('image/'))return reject(Error('Csak képfájl lehet.'));if(file.size>400000)return reject(Error('A profilkép legfeljebb 400 KB legyen.'));const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=reject;r.readAsDataURL(file)})}
-$('loginBtn').onclick=async()=>{try{const name=$('name').value.trim(),code=$('code').value;if(!name){$('loginError').textContent='Írj be egy nevet!';return}avatarData=await readImage($('avatarFile').files[0]);$('loginError').textContent='Csatlakozás…';socket=io();socket.on('connect',()=>socket.emit('join',{name,code,avatar:avatarData}));socket.on('login-error',e=>{$('loginError').textContent=e;socket.disconnect()});socket.on('joined',data=>{me={id:data.id,name};$('login').classList.add('hidden');$('app').classList.remove('hidden');$('myName').textContent=name;setMyAvatar(avatarData);renderUsers(data.users);data.history.forEach(addMessage);$('messageInput').focus()});setupSocket()}catch(e){$('loginError').textContent=e.message||'Nem sikerült.'}};
-function setMyAvatar(data){const old=$('myAvatar');if(data){old.src=data;old.style.display='block'}else{old.style.display='grid';old.removeAttribute('src');old.alt=me?.name||'?';old.style.objectFit='contain';old.style.background='#374157';old.style.visibility='visible';old.style.setProperty('--initial',(me?.name||'?')[0])}}
-function setupSocket(){socket.on('chat-message',addMessage);socket.on('users',renderUsers);socket.on('user-left',u=>{dropPeer(u.id);setStatus(u.name+' kilépett.');});socket.on('user-joined',u=>{setStatus(u.name+' csatlakozott.');if(localStream&&u.id!==me?.id)getPeer(u.id)});socket.on('rtc-signal',async({from,signal})=>{try{const pc=getPeer(from,false);if(signal.description){await pc.setRemoteDescription(signal.description);if(signal.description.type==='offer'){await pc.setLocalDescription(await pc.createAnswer());socket.emit('rtc-signal',{to:from,signal:{description:pc.localDescription}})} }else if(signal.candidate){await pc.addIceCandidate(signal.candidate)}}catch(e){console.error(e);setStatus('A hívás kapcsolódása nem sikerült. Ellenőrizzétek a mikrofonengedélyt és a HTTPS-linket.')}});socket.on('call-status',x=>setStatus(x.name+': '+x.status));}
-function renderUsers(users){$('count').textContent=users.length;$('userList').replaceChildren();users.forEach(u=>{const li=document.createElement('li');const av=makeAvatar(u.name,u.avatar);li.append(av);const span=document.createElement('span');span.textContent=u.name+(u.id===me?.id?' (te)':'');li.append(span);$('userList').append(li)})}
-function addMessage(m){const row=document.createElement('div');row.className='message';row.append(makeAvatar(m.name,m.avatar));const body=document.createElement('div');const meta=document.createElement('div');meta.className='meta';const t=new Date(m.time);meta.textContent=m.name+' · '+t.toLocaleTimeString('hu-HU',{hour:'2-digit',minute:'2-digit'});const txt=document.createElement('div');txt.className='text';txt.textContent=m.text;body.append(meta,txt);row.append(body);$('messages').append(row);$('messages').scrollTop=$('messages').scrollHeight}
-$('form').onsubmit=e=>{e.preventDefault();const v=$('messageInput').value.trim();if(v&&socket?.connected)socket.emit('chat-message',v);$('messageInput').value=''};
-$('changeAvatar').onchange=async e=>{try{avatarData=await readImage(e.target.files[0]);setMyAvatar(avatarData);socket.emit('avatar-update',avatarData)}catch(err){alert(err.message)}};
-function setStatus(s){$('callStatus').textContent=s}
-function getPeer(id,initiate=true){if(peers.has(id))return peers.get(id);const pc=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'}]});peers.set(id,pc);if(localStream)localStream.getTracks().forEach(t=>pc.addTrack(t,localStream));pc.onicecandidate=e=>{if(e.candidate)socket.emit('rtc-signal',{to:id,signal:{candidate:e.candidate}})};pc.ontrack=e=>{let el=remoteEls.get(id);if(!el){el=document.createElement('audio');el.autoplay=true;el.controls=true;el.style.maxWidth='220px';$('remoteAudio').append(el);remoteEls.set(id,el)}el.srcObject=e.streams[0]};pc.onconnectionstatechange=()=>{if(pc.connectionState==='connected')setStatus('Hívásban vagy.');if(['failed','disconnected','closed'].includes(pc.connectionState))setStatus('A hívás megszakadt vagy nem tudott kapcsolódni.')};if(initiate){pc.createOffer().then(o=>pc.setLocalDescription(o)).then(()=>socket.emit('rtc-signal',{to:id,signal:{description:pc.localDescription}})).catch(console.error)}return pc}
-async function startMic(){if(!navigator.mediaDevices?.getUserMedia){setStatus('A mikrofon csak HTTPS-es weboldalon vagy localhoston használható.');return}try{localStream=await navigator.mediaDevices.getUserMedia({audio:true,video:false});for(const [id,pc] of peers){localStream.getAudioTracks().forEach(t=>pc.addTrack(t,localStream));const offer=await pc.createOffer();await pc.setLocalDescription(offer);socket.emit('rtc-signal',{to:id,signal:{description:pc.localDescription}})}$('micBtn').textContent='🎙️ Mikrofon bekapcsolva';$('leaveCall').disabled=false;socket.emit('call-status','bekapcsolta a mikrofont');const others=[...document.querySelectorAll('#userList li')].length-1;if(others>0){for(const u of window.latestUsers||[])if(u.id!==me.id)getPeer(u.id)}setStatus('Mikrofon bekapcsolva. Kapcsolódás a bent lévő tagokhoz…')}catch(e){setStatus('Nem kaptunk mikrofonengedélyt: '+e.message)}}
-$('micBtn').onclick=startMic;
-$('shareBtn').onclick=async()=>{try{if(!navigator.mediaDevices?.getDisplayMedia){setStatus('A képernyőmegosztás HTTPS-es linken működik.');return}screenStream=await navigator.mediaDevices.getDisplayMedia({video:true,audio:false});const track=screenStream.getVideoTracks()[0];for(const pc of peers.values()){const sender=pc.getSenders().find(s=>s.track?.kind==='video');if(sender)await sender.replaceTrack(track);else pc.addTrack(track,screenStream);const offer=await pc.createOffer();await pc.setLocalDescription(offer);const id=[...peers.entries()].find(([k,v])=>v===pc)?.[0];if(id)socket.emit('rtc-signal',{to:id,signal:{description:pc.localDescription}})}const video=document.createElement('video');video.autoplay=true;video.muted=true;video.srcObject=screenStream;$('videos').replaceChildren(video);track.onended=()=>{$('videos').replaceChildren();setStatus('Képernyőmegosztás befejezve.')}}catch(e){setStatus('A képernyőmegosztás nem indult el: '+e.message)}};
-function dropPeer(id){const pc=peers.get(id);if(pc)pc.close();peers.delete(id);const el=remoteEls.get(id);if(el)el.remove();remoteEls.delete(id)}
-$('leaveCall').onclick=()=>{for(const id of [...peers.keys()])dropPeer(id);if(localStream)localStream.getTracks().forEach(t=>t.stop());localStream=null;if(screenStream)screenStream.getTracks().forEach(t=>t.stop());screenStream=null;$('videos').replaceChildren();$('remoteAudio').replaceChildren();$('micBtn').textContent='🎙️ Mikrofon bekapcsolása';$('leaveCall').disabled=true;socket.emit('call-status','befejezte a hívást');setStatus('Hívás befejezve.')};
-// Keep a current roster for joining ongoing calls.
-const oldRenderUsers=renderUsers;renderUsers=function(users){window.latestUsers=users;oldRenderUsers(users)};
-</script></body></html>
+
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sulismc</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#101522;color:#f4f6ff;font-family:Arial,sans-serif}
+main{max-width:1000px;margin:auto;padding:20px}
+h1{color:#78aaff}
+.panel{background:#1c2435;padding:16px;border-radius:12px;margin:16px 0}
+input,button{padding:11px;border:0;border-radius:7px;font-size:15px}
+input{background:#303b50;color:white;min-width:0;flex:1}
+button{background:#3978ed;color:white;cursor:pointer}
+button:disabled{opacity:.45;cursor:not-allowed}
+.row{display:flex;gap:8px;margin:8px 0}
+#messages{height:250px;overflow:auto}
+.msg{padding:9px;background:#111827;border-radius:7px;margin:7px 0;overflow-wrap:anywhere}
+.notice{color:#a7b5ca;font-size:13px;margin:7px 0}
+#videos{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
+video{width:100%;background:#080b12;border-radius:10px;max-height:300px}
+.small{color:#b4bfd2;font-size:13px}
+@media(max-width:500px){.row{flex-wrap:wrap}.row input{flex-basis:100%}}
+</style>
+</head>
+<body>
+<main>
+<h1>Sulismc</h1>
+<p class="small">Közösségi chat és hívás</p>
+
+<section class="panel">
+<h3>Belépés</h3>
+<div class="row">
+<input id="name" maxlength="24" placeholder="Felhasználónév">
+<button id="join">Csatlakozás</button>
+</div>
+<p id="status" class="small">Kapcsolódás...</p>
+</section>
+
+<section class="panel">
+<h3>Közös chat</h3>
+<div id="messages"></div>
+<form id="form" class="row">
+<input id="text" maxlength="1000" placeholder="Írj üzenetet..." disabled>
+<button id="send" disabled>Küldés</button>
+</form>
+</section>
+
+<section class="panel">
+<h3>Hang- és videóhívás</h3>
+<p class="small">A híváshoz engedélyezd a mikrofont és szükség esetén a kamerát.</p>
+<div class="row">
+<button id="call" disabled>Hívás indítása</button>
+<button id="camera" disabled>Kamera be/ki</button>
+<button id="share" disabled>Képernyő megosztása</button>
+<button id="leave" disabled>Hívás befejezése</button>
+</div>
+<p id="callStatus" class="small">Nem vagy hívásban.</p>
+<div id="videos"></div>
+</section>
+</main>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const socket = io();
+
+const $ = id => document.getElementById(id);
+const messages = $("messages");
+const videos = $("videos");
+const peers = new Map();
+
+let joined = false;
+let inCall = false;
+let localStream = null;
+let screenStream = null;
+let cameraEnabled = true;
+
+const rtcConfig = {
+  iceServers: [
+    { urls: "stun:stun.l.google.com:19302" }
+  ]
+};
+
+function notice(text) {
+  const div = document.createElement("div");
+  div.className = "notice";
+  div.textContent = text;
+  messages.appendChild(div);
+  messages.scrollTop = messages.scrollHeight;
+}
+
+function addMessage(data) {
+  const div = document.createElement("div");
+  div.className = "msg";
+  div.textContent =
+    (data.time ? data.time + " — " : "") +
+    data.name + ": " + data.text;
+  messages.appendChild(div);
+  messages.scrollTop = messages.scrollHeight;
+}
+
+socket.on("connect", () => $("status").textContent = "Kapcsolódva.");
+socket.on("connect_error", () => $("status").textContent = "Kapcsolódási hiba.");
+socket.on("disconnect", () => $("status").textContent = "A kapcsolat megszakadt.");
+socket.on("notice", notice);
+socket.on("message", addMessage);
+
+$("join").onclick = () => {
+  const name = $("name").value.trim();
+  if (!name) {
+    $("status").textContent = "Írj be egy felhasználónevet!";
+    return;
+  }
+
+  socket.emit("join", name);
+  joined = true;
+  $("name").disabled = true;
+  $("join").disabled = true;
+  $("text").disabled = false;
+  $("send").disabled = false;
+  $("call").disabled = false;
+  $("status").textContent = "Belépve: " + name;
+};
+
+$("form").onsubmit = event => {
+  event.preventDefault();
+  const text = $("text").value.trim();
+  if (!joined || !text) return;
+  socket.emit("message", text);
+  $("text").value = "";
+};
+
+function addVideo(id, stream, muted = false) {
+  let video = document.getElementById("video-" + id);
+  if (!video) {
+    video = document.createElement("video");
+    video.id = "video-" + id;
+    video.autoplay = true;
+    video.playsInline = true;
+    video.muted = muted;
+    video.title = id === "local" ? "Te" : "Másik résztvevő";
+    videos.appendChild(video);
+  }
+  video.srcObject = stream;
+}
+
+function removePeer(id) {
+  const pc = peers.get(id);
+  if (pc) pc.close();
+  peers.delete(id);
+  document.getElementById("video-" + id)?.remove();
+}
+
+function createPeer(id) {
+  if (peers.has(id)) return peers.get(id);
+
+  const pc = new RTCPeerConnection(rtcConfig);
+  peers.set(id, pc);
+
+  localStream.getTracks().forEach(track => {
+    pc.addTrack(track, localStream);
+  });
+
+  pc.onicecandidate = event => {
+    if (event.candidate) {
+      socket.emit("call:signal", {
+        to: id,
+        data: { candidate: event.candidate }
+      });
+    }
+  };
+
+  pc.ontrack = event => {
+    const stream = event.streams[0];
+    if (stream) addVideo(id, stream);
+  };
+
+  pc.onconnectionstatechange = () => {
+    if (["failed", "closed"].includes(pc.connectionState)) {
+      removePeer(id);
+    }
+  };
+
+  return pc;
+}
+
+async function sendOffer(id) {
+  const pc = createPeer(id);
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  socket.emit("call:signal", {
+    to: id,
+    data: { description: pc.localDescription }
+  });
+}
+
+socket.on("call:peers", async ids => {
+  for (const id of ids) {
+    try {
+      await sendOffer(id);
+    } catch (error) {
+      console.error(error);
+    }
+  }
+});
+
+socket.on("call:peer-joined", async peer => {
+  notice(peer.name + " belépett a hívásba.");
+  // Az új résztvevő ajánlatát ő maga küldi el a már bent lévőknek.
+});
+
+socket.on("call:signal", async ({ from, data }) => {
+  try {
+    let pc = peers.get(from);
+
+    if (data.description) {
+      if (!pc) pc = createPeer(from);
+      await pc.setRemoteDescription(data.description);
+
+      if (data.description.type === "offer") {
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        socket.emit("call:signal", {
+          to: from,
+          data: { description: pc.localDescription }
+        });
+      }
+    }
+
+    if (data.candidate && pc) {
+      await pc.addIceCandidate(data.candidate);
+    }
+  } catch (error) {
+    console.error("Hívási hiba:", error);
+    $("callStatus").textContent = "Hívási hiba. Próbáld újra.";
+  }
+});
+
+socket.on("call:peer-left", ({ id }) => {
+  removePeer(id);
+  notice("Egy résztvevő kilépett a hívásból.");
+});
+
+$("call").onclick = async () => {
+  if (!joined || inCall) return;
+
+  try {
+    localStream = await navigator.mediaDevices.getUserMedia({
+      audio: true,
+      video: true
+    });
+
+    inCall = true;
+    addVideo("local", localStream, true);
+    $("callStatus").textContent = "Hívásban vagy.";
+    $("call").disabled = true;
+    $("camera").disabled = false;
+    $("share").disabled = false;
+    $("leave").disabled = false;
+
+    socket.emit("call:join");
+  } catch (error) {
+    $("callStatus").textContent =
+      "Nem sikerült elérni a kamerát vagy mikrofont. Ellenőrizd a böngésző engedélyeit.";
+  }
+};
+
+$("camera").onclick = () => {
+  if (!localStream) return;
+
+  cameraEnabled = !cameraEnabled;
+  localStream.getVideoTracks().forEach(track => {
+    track.enabled = cameraEnabled;
+  });
+
+  $("camera").textContent = cameraEnabled ? "Kamera be/ki" : "Kamera kikapcsolva";
+};
+
+$("share").onclick = async () => {
+  if (!inCall || screenStream) return;
+
+  try {
+    screenStream = await navigator.mediaDevices.getDisplayMedia({
+      video: true,
+      audio: false
+    });
+
+    const screenTrack = screenStream.getVideoTracks()[0];
+
+    for (const pc of peers.values()) {
+      const sender = pc.getSenders().find(s => s.track?.kind === "video");
+      if (sender) await sender.replaceTrack(screenTrack);
+    }
+
+    screenTrack.onended = stopSharing;
+    $("callStatus").textContent = "A képernyődet megosztod.";
+  } catch (error) {
+    $("callStatus").textContent = "A képernyőmegosztást megszakítottad vagy nem engedélyezted.";
+  }
+};
+
+async function stopSharing() {
+  if (!screenStream) return;
+
+  const oldScreen = screenStream;
+  screenStream = null;
+  oldScreen.getTracks().forEach(track => track.stop());
+
+  const cameraTrack = localStream?.getVideoTracks()[0];
+  for (const pc of peers.values()) {
+    const sender = pc.getSenders().find(s => s.track?.kind === "video");
+    if (sender && cameraTrack) await sender.replaceTrack(cameraTrack);
+  }
+
+  $("callStatus").textContent = "A képernyőmegosztás véget ért.";
+}
+
+$("leave").onclick = async () => {
+  if (screenStream) await stopSharing();
+
+  socket.emit("call:leave");
+  for (const id of [...peers.keys()]) removePeer(id);
+
+  if (localStream) {
+    localStream.getTracks().forEach(track => track.stop());
+  }
+
+  localStream = null;
+  inCall = false;
+  $("video-local")?.remove();
+  $("call").disabled = false;
+  $("camera").disabled = true;
+  $("share").disabled = true;
+  $("leave").disabled = true;
+  $("callStatus").textContent = "Kiléptél a hívásból.";
+};
+</script>
+</body>
+</html>
